@@ -2,13 +2,15 @@
 
 日常开发从最新 `main` 创建功能分支，提交 PR 到 `main`。写清问题、修改后的行为、实际验证结果和发布影响，由项目负责人审查后合并。`main` 用于集成变更，`release` 用于记录已批准发布的版本。
 
-发布时从**本仓库的 `main` 向 `release`** 创建 PR。禁止把功能分支或 fork 的同名 `main` 直接合入 `release`。`AI Service CI` 会验证分支名和来源仓库。仓库管理员还需创建 `release` 分支并配置分支规则：`main` 要求 PR、负责人审查及 `AI source checks`；`release` 要求 PR、`AI source checks` 及 `Verify main-to-release promotion`。仅提交 workflow 和 CODEOWNERS 不会自动启用这些仓库规则。
+发布时从**本仓库的 `main` 向 `release`** 创建 PR。禁止把功能分支或 fork 的同名 `main` 直接合入 `release`。`AI Service CI` 会验证分支名和来源仓库。`AI source checks` 继续作为既有必需检查，包含源码编译与 Guide/Critic 契约测试；`release` 还需 `Verify main-to-release promotion`。两类服务测试失败都会使已有必需检查失败。
 
 ## 检查范围
 
-CI 使用 Python 3.11 编译三个自有服务目录中的 Python 源码，检查目录和关键入口存在，并逐个输出检查结果。它不导入服务、不启动模型、不安装 GPU 依赖，也不编译 `vmm-service/third_party` 中的 AudioCraft 快照。
+CI 使用与当前生产服务一致的 Python 3.10。`AI source checks` 编译 Guide、Critic、三个旧服务和测试目录的第一方 Python，要求当前服务的模块、依赖文件及旧服务关键入口存在。该步骤不导入服务，也不编译 `vmm-service/third_party` 中的 AudioCraft 快照。
 
-这项检查只能证明源码通过语法编译。它不能证明依赖可安装、CUDA / PyTorch 兼容、模型可加载或推理行为正确。涉及这些内容的 PR 应在对应服务器环境中执行验证，并记录命令、环境、结果及未完成事项。不要为了通过基础 CI 在生产服务器重新安装整套 GPU 环境。
+同一个 `AI source checks` job 随后安装两个轻量服务的声明依赖，通过进程内客户端验证配置、鉴权、健康/就绪、请求结构及确定性本地评价流程。测试隔离私有环境配置并阻止 provider 网络传输，不使用真实密钥或 GPU。
+
+语法和离线契约检查不能证明真实 provider 的连通性与生成质量，也不能证明旧 GPU 服务可加载或推理正确。涉及这些内容的 PR 应记录相应环境、执行命令、结果及未完成事项。不要为了通过 CI 在生产环境原地重装依赖或整套 GPU 环境。
 
 ## 资源与密钥
 
@@ -16,6 +18,6 @@ CI 使用 Python 3.11 编译三个自有服务目录中的 Python 源码，检�
 
 ## 当前发布状态
 
-本次补齐只建立协作检查，**尚未配置 release 合并后的自动部署**。合并到 `release` 不会复制文件、重启服务器或更新模型。正式接通发布前，需要确认服务器上的实际服务目录、启动入口、健康检查、制品版本和恢复流程，并与现有 R25 部署协调机制衔接。
+当前源码迁入和 CI **尚不执行 release 合并后的生产部署**。接通发布需通过 Deploy 的 R25 统一控制，核验组件提交 SHA、源码/环境包装器摘要绑定、进程身份与健康/就绪，并保留完整回滚状态，详见 [R25 发布边界](docs/r25-ai-services.md)。
 
-当前仓库包含 MusicGen、Vision 和 VMM。服务器上的 Guide / Critic 源码归属及是否由本仓库发布，仍待现场核查；在核查完成前，不把它们纳入该仓库的自动重启或部署范围。
+Guide/Critic 已确认属于当前国画项目并纳入本仓库；运行和部署职责由 Deploy 管理。MusicGen、Vision、VMM 保留源码，当前 R25 发布不启动它们。

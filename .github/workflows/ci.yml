@@ -18,7 +18,7 @@ jobs:
   source:
     name: AI source checks
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,7 +26,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            guide_service/requirements.txt
+            critic-service/requirements.txt
 
       - name: Compile first-party Python sources without importing services
         shell: bash
@@ -35,8 +39,27 @@ jobs:
           from pathlib import Path
           import tokenize
 
-          roots = ("musicgen-service", "vision-service", "vmm-service")
+          roots = ("guide_service", "critic-service/app", "musicgen-service", "vision-service", "vmm-service", "tests")
           required = (
+              "guide_service/__init__.py",
+              "guide_service/__main__.py",
+              "guide_service/app.py",
+              "guide_service/config.py",
+              "guide_service/diagnostics.py",
+              "guide_service/env_loader.py",
+              "guide_service/qwen_client.py",
+              "guide_service/schema.py",
+              "guide_service/requirements.txt",
+              "critic-service/app/__init__.py",
+              "critic-service/app/main.py",
+              "critic-service/app/config.py",
+              "critic-service/app/dimensions.py",
+              "critic-service/app/image_utils.py",
+              "critic-service/app/llm.py",
+              "critic-service/app/orchestrator.py",
+              "critic-service/app/prompts.py",
+              "critic-service/app/schemas.py",
+              "critic-service/requirements.txt",
               "musicgen-service/start_server.py",
               "musicgen-service/musicgen_api/api.py",
               "musicgen-service/musicgen_api/models.py",
@@ -65,6 +88,12 @@ jobs:
               print(f"OK {path.as_posix()}")
           print(f"Validated {len(sources)} first-party Python files; no service imports or GPU execution.")
           PY
+
+      - name: Install lightweight service and test dependencies
+        run: python -m pip install -r guide_service/requirements.txt -r critic-service/requirements.txt
+
+      - name: Check configuration, authentication and offline service contracts
+        run: python -m pytest -q tests
 
   release-source:
     name: Verify main-to-release promotion
