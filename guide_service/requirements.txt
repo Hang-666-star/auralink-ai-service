@@ -1,0 +1,4 @@
+# Runtime contract for the already-provisioned auralink-ai environment.
+# Round 6 does not install from this file or access the network.
+Flask==3.1.0
+requests==2.32.5

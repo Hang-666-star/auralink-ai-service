@@ -1,0 +1,16 @@
+[project]
+name = "guohua-multi-agent-evaluator"
+version = "1.0.0"
+description = "Score-free multi-agent evaluation backend for Chinese paintings"
+requires-python = ">=3.10,<3.14"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
