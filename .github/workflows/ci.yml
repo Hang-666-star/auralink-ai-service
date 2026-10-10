@@ -1,0 +1,86 @@
+name: AI Service CI
+
+on:
+  pull_request:
+    branches: [main, release]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-service-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: AI source checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile first-party Python sources without importing services
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tokenize
+
+          roots = ("musicgen-service", "vision-service", "vmm-service")
+          required = (
+              "musicgen-service/start_server.py",
+              "musicgen-service/musicgen_api/api.py",
+              "musicgen-service/musicgen_api/models.py",
+              "vision-service/app.py",
+              "vmm-service/app.py",
+          )
+          for name in roots:
+              if not Path(name).is_dir():
+                  raise SystemExit(f"Missing service directory: {name}")
+          for name in required:
+              if not Path(name).is_file():
+                  raise SystemExit(f"Missing service entry point: {name}")
+
+          sources = sorted(
+              path
+              for name in roots
+              for path in Path(name).rglob("*.py")
+              if "third_party" not in path.parts and "__pycache__" not in path.parts
+          )
+          if not sources:
+              raise SystemExit("No first-party Python source files found")
+
+          for path in sources:
+              with tokenize.open(path) as source:
+                  compile(source.read(), str(path), "exec")
+              print(f"OK {path.as_posix()}")
+          print(f"Validated {len(sources)} first-party Python files; no service imports or GPU execution.")
+          PY
+
+  release-source:
+    name: Verify main-to-release promotion
+    if: github.event_name == 'pull_request' && github.base_ref == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require main from this repository as the release source
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$HEAD_BRANCH" != "main" || "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]]; then
+            echo "Only this repository's main branch may target release." >&2
+            exit 1
+          fi
+          echo "Verified promotion path: same-repository main -> release"
