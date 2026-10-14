@@ -15,6 +15,8 @@ import subprocess
 import zipfile
 
 SCHEMA = "AURALINK_R25_AI_CANDIDATE_V1"
+ASSISTANT_SCHEMA = "AURALINK_R25_AI_CANDIDATE_V2"
+CURRENT_REPOSITORY = "bailangguihun/auralink-ai-service"
 REPOSITORY = "Hang-666-star/auralink-ai-service"
 REF = "refs/heads/release"
 ARCHIVE = "ai-source.zip"
@@ -28,6 +30,15 @@ SOURCE_PATHS = tuple(sorted([
     "critic-service/app/orchestrator.py", "critic-service/app/prompts.py", "critic-service/app/schemas.py",
     "critic-service/requirements.txt",
 ]))
+ASSISTANT_PATHS = tuple(sorted(SOURCE_PATHS + tuple("critic-service/app/assistant/" + name for name in (
+    "__init__.py", "config.py", "schemas.py", "router.py", "execution.py", "providers.py", "retrieval.py", "prompts.py"))))
+
+
+def inventory(schema):
+    require(schema in (SCHEMA, ASSISTANT_SCHEMA), "candidate_inventory_version")
+    return SOURCE_PATHS if schema == SCHEMA else ASSISTANT_PATHS
+
+
 DEPENDENCIES = ("guide_service/requirements.txt", "critic-service/requirements.txt")
 MAX_FILE = 1024 * 1024
 MAX_TOTAL = 5 * MAX_FILE
@@ -90,8 +101,8 @@ def validate_source(path, content):
         raise InvalidCandidate("source_encoding_or_syntax") from error
 
 
-def provenance(repository, ref, commit, run_id, run_attempt):
-    require(repository == REPOSITORY and ref == REF, "repository_or_ref")
+def provenance(repository, ref, commit, run_id, run_attempt, schema=SCHEMA):
+    require(repository == (REPOSITORY if schema == SCHEMA else CURRENT_REPOSITORY) and ref == REF, "repository_or_ref")
     require(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}", commit), "full_commit_required")
     for value in (run_id, run_attempt):
         require(isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,19}", value), "run_identity")
@@ -99,10 +110,11 @@ def provenance(repository, ref, commit, run_id, run_attempt):
             "run_id": run_id, "run_attempt": run_attempt}
 
 
-def collect_source(root):
+def collect_source(root, schema=SCHEMA):
+    paths = inventory(schema)
     no_links(root)
     source = {}
-    for path in SOURCE_PATHS:
+    for path in paths:
         data = read_regular(root / path, MAX_FILE)
         validate_source(path, data)
         source[path] = data
@@ -112,7 +124,7 @@ def collect_source(root):
     for directory in (root / "guide_service", root / "critic-service" / "app"):
         for path in directory.rglob("*.py"):
             if "__pycache__" not in path.parts:
-                require(path.relative_to(root).as_posix() in SOURCE_PATHS, "unregistered_runtime_module")
+                require(path.relative_to(root).as_posix() in paths, "unregistered_runtime_module")
     return source
 
 
@@ -125,13 +137,14 @@ def verify_checkout(root, commit, source):
         require(git("show", f"{commit}:{path}") == data, "checkout_source_mismatch")
 
 
-def build(source, identity):
-    require(set(source) == set(SOURCE_PATHS), "source_inventory")
-    provenance(identity["repository"], identity["ref"], identity["commit_sha"], identity["run_id"], identity["run_attempt"])
+def build(source, identity, schema=SCHEMA):
+    paths = inventory(schema)
+    require(set(source) == set(paths), "source_inventory")
+    provenance(identity["repository"], identity["ref"], identity["commit_sha"], identity["run_id"], identity["run_attempt"], schema)
     files = []
     target = io.BytesIO()
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for path in SOURCE_PATHS:
+        for path in paths:
             data = source[path]
             validate_source(path, data)
             info = zipfile.ZipInfo(path, date_time=(1980, 1, 1, 0, 0, 0))
@@ -142,7 +155,7 @@ def build(source, identity):
             files.append({"path": path, "bytes": len(data), "sha256": digest(data)})
     blob = target.getvalue()
     require(sum(x["bytes"] for x in files) <= MAX_TOTAL and len(blob) <= MAX_ARCHIVE, "total_size")
-    manifest = {"schema": SCHEMA, **identity, "python_version": "3.10", "production_approved": False,
+    manifest = {"schema": schema, **identity, "python_version": "3.10", "production_approved": False,
         "archive": {"name": ARCHIVE, "bytes": len(blob), "sha256": digest(blob)},
         "files": files, "source_tree_sha256": digest(canonical(files)),
         "dependency_sha256": {path: digest(source[path]) for path in DEPENDENCIES}}
@@ -153,18 +166,19 @@ def verify(manifest, blob, expected_commit, expected_run_id, expected_run_attemp
     require(type(manifest) is dict and set(manifest) == {
         "schema", "repository", "ref", "commit_sha", "run_id", "run_attempt", "python_version",
         "production_approved", "archive", "files", "source_tree_sha256", "dependency_sha256"}, "manifest_fields")
-    identity = provenance(manifest["repository"], manifest["ref"], manifest["commit_sha"], manifest["run_id"], manifest["run_attempt"])
+    paths = inventory(manifest["schema"])
+    identity = provenance(manifest["repository"], manifest["ref"], manifest["commit_sha"], manifest["run_id"], manifest["run_attempt"], manifest["schema"])
     require(identity["commit_sha"] == expected_commit and identity["run_id"] == expected_run_id
         and identity["run_attempt"] == expected_run_attempt, "unexpected_release_run")
-    require(manifest["schema"] == SCHEMA and manifest["python_version"] == "3.10"
+    require(manifest["schema"] in (SCHEMA, ASSISTANT_SCHEMA) and manifest["python_version"] == "3.10"
         and manifest["production_approved"] is False, "manifest_contract")
     require(type(manifest["archive"]) is dict and manifest["archive"] == {
         "name": ARCHIVE, "bytes": len(blob), "sha256": digest(blob)}, "archive_binding")
     require(len(blob) <= MAX_ARCHIVE, "archive_size")
     files = manifest["files"]
-    require(type(files) is list and len(files) == len(SOURCE_PATHS), "file_inventory")
+    require(type(files) is list and len(files) == len(paths), "file_inventory")
     require(all(type(x) is dict and set(x) == {"path", "bytes", "sha256"} for x in files), "file_fields")
-    require([x["path"] for x in files] == list(SOURCE_PATHS), "file_inventory")
+    require([x["path"] for x in files] == list(paths), "file_inventory")
     require(all(type(x["bytes"]) is int and 0 <= x["bytes"] <= MAX_FILE
         and isinstance(x["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", x["sha256"]) for x in files), "file_metadata")
     require(sum(x["bytes"] for x in files) <= MAX_TOTAL, "total_size")
@@ -173,7 +187,7 @@ def verify(manifest, blob, expected_commit, expected_run_id, expected_run_attemp
     require(manifest["dependency_sha256"] == {p: file_map[p]["sha256"] for p in DEPENDENCIES}, "dependency_binding")
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as archive:
-            require(archive.namelist() == list(SOURCE_PATHS), "archive_inventory")
+            require(archive.namelist() == list(paths), "archive_inventory")
             for info in archive.infolist():
                 require(not info.is_dir() and not stat.S_ISLNK(info.external_attr >> 16)
                     and info.file_size == file_map[info.filename]["bytes"]
@@ -198,6 +212,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     create = sub.add_parser("create")
+    create.add_argument("--inventory", choices=(SCHEMA, ASSISTANT_SCHEMA), default=ASSISTANT_SCHEMA)
     create.add_argument("--source", type=Path, default=Path("."))
     create.add_argument("--output", type=Path, required=True)
     create.add_argument("--repository", required=True)
@@ -213,10 +228,10 @@ def main():
     check.add_argument("--expected-run-attempt", required=True)
     args = parser.parse_args()
     if args.command == "create":
-        identity = provenance(args.repository, args.ref, args.commit, args.run_id, args.run_attempt)
-        source = collect_source(args.source)
+        identity = provenance(args.repository, args.ref, args.commit, args.run_id, args.run_attempt, args.inventory)
+        source = collect_source(args.source, args.inventory)
         verify_checkout(args.source, args.commit, source)
-        manifest, blob = build(source, identity)
+        manifest, blob = build(source, identity, args.inventory)
         verify(manifest, blob, args.commit, args.run_id, args.run_attempt)
         no_links(args.output)
         args.output.mkdir(parents=True, exist_ok=True)

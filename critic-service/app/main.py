@@ -170,3 +170,9 @@ async def create_evaluation(
 @app.exception_handler(413)
 async def payload_too_large(_, __):
     return JSONResponse(status_code=413, content={"detail": "上传内容过大"})
+
+
+# Assistant has isolated configuration, clients and limits; disabled/malformed
+# Assistant configuration must not modify the existing Critic health contract.
+from .assistant.router import install_assistant
+install_assistant(app)
