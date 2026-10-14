@@ -18,9 +18,9 @@ SPEC.loader.exec_module(candidate)
 class CandidateTests(unittest.TestCase):
     def setUp(self):
         self.source = {path: (b"VALUE = 1\n" if path.endswith(".py") else b"example-package==1.0\n")
-                       for path in candidate.SOURCE_PATHS}
-        self.identity = candidate.provenance(candidate.REPOSITORY, candidate.REF, "a" * 40, "123", "1")
-        self.manifest, self.archive = candidate.build(self.source, self.identity)
+                       for path in candidate.ASSISTANT_PATHS}
+        self.identity = candidate.provenance(candidate.CURRENT_REPOSITORY, candidate.REF, "a" * 40, "123", "1", candidate.ASSISTANT_SCHEMA)
+        self.manifest, self.archive = candidate.build(self.source, self.identity, candidate.ASSISTANT_SCHEMA)
 
     def verify(self, manifest=None, archive=None, commit="a" * 40, run="123", attempt="1"):
         return candidate.verify(self.manifest if manifest is None else manifest,
@@ -37,11 +37,19 @@ class CandidateTests(unittest.TestCase):
         manifest["archive"] = {"name": candidate.ARCHIVE, "bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}
         return manifest, blob
 
-    def test_roundtrip_binds_complete_commit_and_nineteen_files(self):
+    def test_roundtrip_binds_complete_commit_and_assistant_inventory(self):
         verified = self.verify()
-        self.assertEqual(19, len(verified["files"]))
+        self.assertEqual(27, len(verified["files"]))
         self.assertEqual(set(candidate.DEPENDENCIES), set(verified["dependency_sha256"]))
         self.assertIs(False, verified["production_approved"])
+
+    def test_v1_legacy_inventory_remains_verifiable(self):
+        source = {path: b"# synthetic legacy fixture\n" for path in candidate.SOURCE_PATHS}
+        identity = candidate.provenance(candidate.REPOSITORY, candidate.REF, "b" * 40, "124", "1")
+        manifest, blob = candidate.build(source, identity)
+        self.assertEqual(len(candidate.verify(manifest, blob, "b" * 40, "124", "1")["files"]), 19)
+        with self.assertRaises(candidate.InvalidCandidate):
+            candidate.build(self.source, identity)
 
     def test_json_duplicate_and_nonfinite_fields_refused(self):
         for raw in ('{"schema":"first","schema":"second"}', '{"x":NaN}', '{"nested":{"x":1,"x":2}}'):
@@ -49,7 +57,7 @@ class CandidateTests(unittest.TestCase):
                 candidate.strict_json(raw)
 
     def test_archive_is_deterministic(self):
-        manifest, archive = candidate.build(dict(reversed(list(self.source.items()))), self.identity)
+        manifest, archive = candidate.build(dict(reversed(list(self.source.items()))), self.identity, candidate.ASSISTANT_SCHEMA)
         self.assertEqual(self.manifest, manifest)
         self.assertEqual(self.archive, archive)
 
@@ -92,22 +100,22 @@ class CandidateTests(unittest.TestCase):
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
-            manifest, archive = self.rebind_archive(lambda z: z.writestr(candidate.SOURCE_PATHS[0], "fixture"))
+            manifest, archive = self.rebind_archive(lambda z: z.writestr(candidate.ASSISTANT_PATHS[0], "fixture"))
         with self.assertRaises(candidate.InvalidCandidate):
             self.verify(manifest, archive)
 
     def test_source_set_must_be_complete(self):
         source = dict(self.source)
-        del source[candidate.SOURCE_PATHS[0]]
+        del source[candidate.ASSISTANT_PATHS[0]]
         with self.assertRaises(candidate.InvalidCandidate):
-            candidate.build(source, self.identity)
+            candidate.build(source, self.identity, candidate.ASSISTANT_SCHEMA)
 
     def test_binary_invalid_python_and_secret_shaped_sources_refused(self):
         for data in [b"\xff", b"def invalid(:", b"KEY = 'sk-" + b"x" * 32 + b"'\n"]:
             source = dict(self.source)
             source["guide_service/app.py"] = data
             with self.subTest(data_length=len(data)), self.assertRaises(candidate.InvalidCandidate):
-                candidate.build(source, self.identity)
+                candidate.build(source, self.identity, candidate.ASSISTANT_SCHEMA)
 
     def test_unregistered_runtime_module_refused_while_env_is_excluded(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -117,10 +125,10 @@ class CandidateTests(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
             (root / "guide_service/.env").write_text("private-fixture")
-            self.assertEqual(self.source, candidate.collect_source(root))
+            self.assertEqual(self.source, candidate.collect_source(root, candidate.ASSISTANT_SCHEMA))
             (root / "guide_service/new_module.py").write_text("VALUE = 2\n")
             with self.assertRaises(candidate.InvalidCandidate):
-                candidate.collect_source(root)
+                candidate.collect_source(root, candidate.ASSISTANT_SCHEMA)
 
     def test_checkout_must_match_commit_and_each_git_blob(self):
         class Result:
@@ -137,6 +145,20 @@ class CandidateTests(unittest.TestCase):
             changed["guide_service/app.py"] = b"VALUE = 2\n"
             with self.assertRaises(candidate.InvalidCandidate):
                 candidate.verify_checkout(Path("."), "a" * 40, changed)
+
+    def test_release_workflow_binds_transferred_repository_and_keeps_writer_gated(self):
+        workflow = (SCRIPT.parents[1] / ".github/workflows/release-candidate.yml").read_text()
+        # Packaging and the existing publisher must use one canonical transferred
+        # identity. A stale owner comparison would refuse the approved artifact.
+        self.assertIn('test "$GITHUB_REPOSITORY" = ' + candidate.CURRENT_REPOSITORY, workflow)
+        self.assertIn('[[ "$GITHUB_REPOSITORY" == ' + candidate.CURRENT_REPOSITORY + ' ]]', workflow)
+        self.assertEqual(2, workflow.count('https://github.com/' + candidate.CURRENT_REPOSITORY + '.git'))
+        self.assertNotIn(candidate.REPOSITORY, workflow)
+        publish = workflow.split('  publish:', 1)[1]
+        self.assertIn("if: vars.R25_DEPLOY_ENABLED == 'true'", publish)
+        self.assertIn('environment: production', publish)
+        self.assertIn('StrictHostKeyChecking=yes', publish)
+        self.assertIn('Refusing an obsolete queued release.', publish)
 
     def test_existing_output_never_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:

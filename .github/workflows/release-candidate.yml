@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/release
-          test "$GITHUB_REPOSITORY" = Hang-666-star/auralink-ai-service
+          test "$GITHUB_REPOSITORY" = bailangguihun/auralink-ai-service
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -94,11 +94,11 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == refs/heads/release ]]
-          [[ "$GITHUB_REPOSITORY" == Hang-666-star/auralink-ai-service ]]
+          [[ "$GITHUB_REPOSITORY" == bailangguihun/auralink-ai-service ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
           [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,19}$ ]]
-          latest="$(git ls-remote --exit-code https://github.com/Hang-666-star/auralink-ai-service.git refs/heads/release | cut -f1)"
+          latest="$(git ls-remote --exit-code https://github.com/bailangguihun/auralink-ai-service.git refs/heads/release | cut -f1)"
           [[ "$latest" == "$GITHUB_SHA" ]] || { echo 'Refusing an obsolete queued release.' >&2; exit 1; }
           [[ "$SERVER_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
           [[ "$SERVER_PORT" =~ ^[0-9]{1,5}$ ]]
@@ -125,7 +125,7 @@ jobs:
             "umask 077; /root/miniconda3/bin/python3 -B '$controller' prepare-incoming $identity"
           scp "${options[@]}" -P "$SERVER_PORT" candidate/ai-release-candidate.json candidate/ai-source.zip \
             "$SERVER_USER@$SERVER_HOST:$incoming/"
-          latest="$(git ls-remote --exit-code https://github.com/Hang-666-star/auralink-ai-service.git refs/heads/release | cut -f1)"
+          latest="$(git ls-remote --exit-code https://github.com/bailangguihun/auralink-ai-service.git refs/heads/release | cut -f1)"
           [[ "$latest" == "$GITHUB_SHA" ]] || { echo 'Release changed during candidate transfer; publication refused.' >&2; exit 1; }
           ssh "${options[@]}" -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
             "chmod 600 '$incoming/ai-release-candidate.json' '$incoming/ai-source.zip'; timeout --signal=TERM --kill-after=60 480 /root/miniconda3/bin/python3 -B '$controller' publish $identity"
