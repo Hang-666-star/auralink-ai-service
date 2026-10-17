@@ -79,12 +79,55 @@ SSE data are supported; frame and total output bounded. No retries, redirects,
 proxy-env inheritance or provider switching. Unknown provider outcomes may
 still be billed; Core must never auto-replay a recorded dispatch intent.
 
+The private stream also carries `heartbeat {kind:"provider_activity"}` after an
+observed, valid non-answer provider delta (`reasoning_content` with nonempty
+text or `role:"assistant"`). It contains no reasoning or answer text and is
+emitted at most once per `min(1000ms, idleMs/3)`, only when a corresponding
+provider frame arrives. SSE comments, empty deltas, silence and unknown fields
+do not generate activity. Core validates the exact payload and consumes it only
+for transport liveness: it is not a persisted answer/source, public event or
+completion. The existing total deadline remains binding even while activity
+continues. Deploy this additive private protocol with the matching Core client;
+older Core clients do not implement this event and reject it. New Core remains
+compatible with the old AI event set. A future coordinated release must prevent
+generation against the new-AI/old-Core combination; an AI-first publication that
+immediately admits generation cannot be reused without that compatibility gate.
+This is a protocol constraint, not an executed or newly approved release plan.
+
 OpenAI-compatible `/chat/completions` request uses explicit registry model,
 stream=true, stream_options.include_usage, max_tokens and messages. Images are
 bounded data URLs, never remotely fetched. Provider must finish with a valid
 finish_reason and `[DONE]`; usage can remain unavailable. Only this compatible
 wire adapter is implemented; provider-specific unsupported dialects are not
 silently adapted or claimed tested.
+
+For the exact registry pair `provider="dashscope", model="qwen3.8-flash"`,
+server configuration may explicitly set `thinkingMode="disabled"`. The raw
+HTTP body then includes top-level `enable_thinking:false`. This is supported
+by the exact model's [thinking documentation](https://help.aliyun.com/zh/model-studio/deep-thinking)
+and [Chat Completions contract](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions/),
+checked 2026-10-15. Its default is thinking-enabled; `max_tokens` limits the
+answer, not reasoning. An implicit provider default is therefore unsuitable
+as an assumed short-reasoning budget for this route's bounded chat window.
+The optional setting defaults to `provider-default` (no extra wire parameter)
+for backward compatibility. Other model/provider pairs reject an override;
+no Flash-alias inference, arbitrary extra parameters or browser override is
+accepted. Qwen3-VL, Guide and Critic keep their existing behavior.
+
+The isolated accepted candidate opts out of thinking for this one route, without
+changing the question, sources, max_tokens=4096, retries, or finite deadlines
+(Core/AI 90s, acceptance harness 105s). It does not set thinking_budget,
+reasoning_effort, stop, response_format or preserve_thinking; no reasoning is
+stored/replayed as history. The authorized 2026-10-17 synthetic Flash text/source
+case completed in 26.869 seconds and passed its original factual/source,
+restoration and export criteria; one request, with no retries. This establishes
+only that case, not general latency/accuracy, multi-turn or visual acceptance.
+The earlier image-free VL source-grounding case passed without this parameter;
+VL serialization is unchanged and no second VL call was made. Windows human
+acceptance remains pending. Historical failed calls and their accounting are
+preserved. Changing a startup config still requires a new digest binding, not
+editing a previously approved record in place. No credentials or isolated
+runtime configuration belong in this repository.
 
 Process-lifetime duplicate attempt IDs return 409 even after completion. This
 is supplementary to Core durable fencing, not cross-process exactly-once.
