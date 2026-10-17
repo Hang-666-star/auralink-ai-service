@@ -32,6 +32,15 @@ class Model(StrictModel):
     capabilities: Capabilities = Field(default_factory=Capabilities)
     enabled: bool = True
     evidence: str = "CONFIGURED_NOT_VERIFIED"
+    # Server-owned opt-in. Do not infer parameter support from a UI alias or
+    # change the provider defaults of other routes (including Qwen3-VL).
+    thinkingMode: Literal["provider-default", "disabled"] = "provider-default"
+
+    @model_validator(mode="after")
+    def validate_thinking_mode(self):
+        if self.thinkingMode == "disabled" and (self.provider, self.model) != ("dashscope", "qwen3.8-flash"):
+            raise ValueError("thinking mode override is not verified for this route")
+        return self
 
 
 class Ragflow(StrictModel):
